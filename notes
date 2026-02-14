@@ -1,0 +1,23 @@
+Ability to sift through massive sources of information fast
+get a higher level curated summary in regional languages
+for older people, who dont use Ability
+
+this news could contain a summary
+on clickin on it. it should contain a full view with all relavant information + clips
+
+this is specially useful for old people
+
+
+
+
+
+- generate transcripts - dont generate, just fetch for now and use sources which have it
+- dump it in a vector db
+- create a semantic search over it (with search keywords) (multilanguage) - use a powerful model
+- find top 10 sources with keyword based search
+- create an article in language of choice
+- create a feed with clips and headlines
+- with embedded video
+- create a html dashboard
+- generate a curated news letter over it
+

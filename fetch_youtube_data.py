@@ -206,21 +206,22 @@ def save_data_to_file(data, output_file='video_transcripts.json'):
         print(f"  ✗ Error saving to file: {e}")
         return False
 
-def save_chunked_transcripts(chunked_data, output_file='video_chunked_transcripts.json'):
+def save_chunked_transcripts(chunked_data, output_file='video_chunked_transcripts.jsonl'):
     """
-    Save chunked transcript data to a separate JSON file.
-    Each chunk is saved as a separate record with complete metadata.
+    Save chunked transcript data to a JSONL file (one JSON object per line).
+    This format is more efficient for large datasets and required by Vertex AI Search.
 
     Args:
         chunked_data: List of chunk records with metadata
-        output_file: Output filename
+        output_file: Output filename (should end in .jsonl)
 
     Returns:
         True if successful, False otherwise
     """
     try:
         with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(chunked_data, f, indent=4, ensure_ascii=False)
+            for chunk in chunked_data:
+                f.write(json.dumps(chunk, ensure_ascii=False) + '\n')
         return True
     except Exception as e:
         print(f"  ✗ Error saving chunked transcripts: {e}")
@@ -299,7 +300,7 @@ def main():
     all_data = []
     all_chunked_data = []  # New: Store flattened chunk records
     output_file = 'video_transcripts.json'
-    chunked_output_file = 'video_chunked_transcripts.json'
+    chunked_output_file = 'video_chunked_transcripts.jsonl'
     print(f"--- Starting Job ---")
 
     for channel in channels_to_scan:
@@ -314,11 +315,11 @@ def main():
             # 2. Get transcript with metadata
             transcript_data, transcript_metadata = get_video_transcript(video['video_id'])
 
-            # 3. Post-process: Chunk transcript into 30-second intervals
+            # 3. Post-process: Chunk transcript into 60-second intervals
             transcript_chunks = None
             if transcript_data:
                 transcript_chunks = chunk_transcript_by_time(transcript_data, chunk_duration=60)
-                print(f"  ✓ Created {len(transcript_chunks)} chunks of 30 seconds each")
+                print(f"  ✓ Created {len(transcript_chunks)} chunks of 60 seconds each")
 
                 # Create flattened chunk records with complete metadata
                 for chunk in transcript_chunks:

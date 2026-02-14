@@ -1,4 +1,29 @@
+# Environment variables
 .env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Data files
 video_transcripts.json
-notes
 video_chunked_transcripts.json
+video_chunked_transcripts.jsonl
+video_chunks_vertex_import.jsonl
+
+# ChromaDB local database
+chroma_db/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

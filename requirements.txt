@@ -1,4 +1,16 @@
+# YouTube Data Fetching
 google-api-python-client
 youtube-transcript-api
-python-dotenv
 isodate
+python-dotenv
+
+# ChromaDB and Vector Search
+chromadb
+tqdm
+
+# Google Cloud (for embeddings)
+google-cloud-aiplatform
+
+# Optional: For GCP Vertex Search (if needed later)
+google-cloud-storage
+google-cloud-discoveryengine
