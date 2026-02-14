@@ -1,3 +1,4 @@
 .env
 video_transcripts.json
 notes
+video_chunked_transcripts.json

@@ -206,6 +206,84 @@ def save_data_to_file(data, output_file='video_transcripts.json'):
         print(f"  ✗ Error saving to file: {e}")
         return False
 
+def save_chunked_transcripts(chunked_data, output_file='video_chunked_transcripts.json'):
+    """
+    Save chunked transcript data to a separate JSON file.
+    Each chunk is saved as a separate record with complete metadata.
+
+    Args:
+        chunked_data: List of chunk records with metadata
+        output_file: Output filename
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(chunked_data, f, indent=4, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"  ✗ Error saving chunked transcripts: {e}")
+        return False
+
+def chunk_transcript_by_time(transcript_data, chunk_duration=30):
+    """
+    Chunks transcript data into time-based segments.
+
+    Args:
+        transcript_data: List of transcript snippets with 'text', 'start_time', and 'duration'
+        chunk_duration: Duration of each chunk in seconds (default: 30)
+
+    Returns:
+        List of chunks, where each chunk contains:
+        - 'text': Combined text for the chunk
+        - 'start_time': Start time of the chunk
+        - 'end_time': End time of the chunk
+        - 'snippets': List of original snippets in this chunk
+    """
+    if not transcript_data:
+        return []
+
+    chunks = []
+    current_chunk_start = 0
+
+    # Find the maximum end time to know when to stop
+    max_end_time = max(
+        snippet['start_time'] + snippet['duration']
+        for snippet in transcript_data
+    )
+
+    # Create chunks for each time window
+    while current_chunk_start <= max_end_time:
+        chunk_end = current_chunk_start + chunk_duration
+
+        # Collect all snippets that overlap with this time window
+        snippets_in_chunk = []
+        for snippet in transcript_data:
+            snippet_start = snippet['start_time']
+            snippet_end = snippet_start + snippet['duration']
+
+            # Check if snippet overlaps with current chunk window
+            # A snippet overlaps if it starts before chunk ends AND ends after chunk starts
+            if snippet_start < chunk_end and snippet_end > current_chunk_start:
+                snippets_in_chunk.append(snippet)
+
+        # Only create a chunk if there are snippets in it
+        if snippets_in_chunk:
+            combined_text = ' '.join(s['text'] for s in snippets_in_chunk)
+
+            chunk = {
+                'text': combined_text,
+                'start_time': current_chunk_start,
+                'end_time': chunk_end,
+                'snippets': snippets_in_chunk
+            }
+            chunks.append(chunk)
+
+        current_chunk_start = chunk_end
+
+    return chunks
+
 def main():
     # ---------------------------------------------------------
     # CONFIGURATION: Add your channels here
@@ -213,12 +291,15 @@ def main():
     channels_to_scan = [
         "Zee Business",
         "@manoramanews",
-        "@CNBC-TV18"
+        "@CNBC-TV18",
+        "ET Now"
     ]
     # ---------------------------------------------------------
 
     all_data = []
+    all_chunked_data = []  # New: Store flattened chunk records
     output_file = 'video_transcripts.json'
+    chunked_output_file = 'video_chunked_transcripts.json'
     print(f"--- Starting Job ---")
 
     for channel in channels_to_scan:
@@ -227,11 +308,46 @@ def main():
         # 1. Get videos
         videos = get_channel_videos_yesterday(channel)
 
-        for video in videos[0:5]:
+        for video in videos[0:3]:
             print(f"\n  Processing: {video['title']}")
 
             # 2. Get transcript with metadata
             transcript_data, transcript_metadata = get_video_transcript(video['video_id'])
+
+            # 3. Post-process: Chunk transcript into 30-second intervals
+            transcript_chunks = None
+            if transcript_data:
+                transcript_chunks = chunk_transcript_by_time(transcript_data, chunk_duration=60)
+                print(f"  ✓ Created {len(transcript_chunks)} chunks of 30 seconds each")
+
+                # Create flattened chunk records with complete metadata
+                for chunk in transcript_chunks:
+                    chunk_record = {
+                        # Video metadata
+                        'channel': channel,
+                        'video_title': video['title'],
+                        'video_url': video['url'],
+                        'video_id': video['video_id'],
+                        'published_at': video['published_at'],
+
+                        # Chunk timing
+                        'chunk_start_time': chunk['start_time'],
+                        'chunk_end_time': chunk['end_time'],
+                        'chunk_duration': chunk['end_time'] - chunk['start_time'],
+
+                        # Chunk content
+                        'text': chunk['text'],
+
+                        # Language metadata
+                        'text_language': transcript_metadata.get('language') if transcript_metadata else None,
+                        'text_language_code': transcript_metadata.get('language_code') if transcript_metadata else None,
+                        'is_auto_generated': transcript_metadata.get('is_generated') if transcript_metadata else None,
+
+                        # Additional metadata for search/indexing
+                        'snippet_count': len(chunk['snippets']),  # Number of original snippets in this chunk
+                        'video_published_date': video['published_at'].split('T')[0] if 'T' in video['published_at'] else video['published_at'],
+                    }
+                    all_chunked_data.append(chunk_record)
 
             video_record = {
                 'channel': channel,
@@ -240,7 +356,8 @@ def main():
                 'video_id': video['video_id'],
                 'published_at': video['published_at'],
                 'transcript': transcript_data,
-                'transcript_metadata': transcript_metadata
+                'transcript_metadata': transcript_metadata,
+                'transcript_chunks': transcript_chunks  # Add chunked transcript
             }
 
             all_data.append(video_record)
@@ -249,13 +366,19 @@ def main():
             if save_data_to_file(all_data, output_file):
                 print(f"  ✓ Saved progress ({len(all_data)} videos so far) to {output_file}")
 
+            # Save chunked data continuously
+            if all_chunked_data and save_chunked_transcripts(all_chunked_data, chunked_output_file):
+                print(f"  ✓ Saved chunked transcripts ({len(all_chunked_data)} chunks so far) to {chunked_output_file}")
+
     # Final summary
     print(f"\n{'='*60}")
     print(f"Job Complete!")
     print(f"Total videos processed: {len(all_data)}")
     videos_with_transcripts = sum(1 for v in all_data if v['transcript'] is not None)
     print(f"Videos with transcripts: {videos_with_transcripts}")
+    print(f"Total chunks created: {len(all_chunked_data)}")
     print(f"Final data saved to: {output_file}")
+    print(f"Final chunked data saved to: {chunked_output_file}")
     print(f"{'='*60}")
 
 if __name__ == "__main__":
