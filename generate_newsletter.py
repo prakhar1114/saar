@@ -301,14 +301,13 @@ def replace_citations_with_video_clips(article: str, chunks: List[Dict]) -> str:
 
             # Create YouTube thumbnail URL
             thumbnail_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
-            watch_url = f"{video_url}&t={int(start_time)}s" if video_url else f"https://www.youtube.com/watch?v={video_id}&t={int(start_time)}s"
 
-            # Create video embed HTML with clickable thumbnail
+            # Create video embed HTML with lazy-loaded iframe
             embed_html = f"""
-<div class="video-clip" data-citation="{citation_num}">
-    <a href="{watch_url}" target="_blank" class="video-thumbnail-link">
+<div class="video-clip" data-citation="{citation_num}" data-video-id="{video_id}" data-start-time="{int(start_time)}">
+    <div class="video-container">
         <div class="video-thumbnail" style="background-image: url('{thumbnail_url}');">
-            <div class="play-button">
+            <div class="play-button" onclick="loadVideo(this)">
                 <svg viewBox="0 0 68 48" width="68" height="48">
                     <path d="M66.52,7.74c-0.78-2.93-2.49-5.41-5.42-6.19C55.79,.13,34,0,34,0S12.21,.13,6.9,1.55 C3.97,2.33,2.27,4.81,1.48,7.74C0.06,13.05,0,24,0,24s0.06,10.95,1.48,16.26c0.78,2.93,2.49,5.41,5.42,6.19 C12.21,47.87,34,48,34,48s21.79-0.13,27.1-1.55c2.93-0.78,4.64-3.26,5.42-6.19C67.94,34.95,68,24,68,24S67.94,13.05,66.52,7.74z" fill="#f00"></path>
                     <path d="M 45,24 27,14 27,34" fill="#fff"></path>
@@ -316,7 +315,7 @@ def replace_citations_with_video_clips(article: str, chunks: List[Dict]) -> str:
             </div>
             <div class="video-time-badge">{int(start_time)}s - {int(end_time)}s</div>
         </div>
-    </a>
+    </div>
     <div class="video-info">
         <h4 class="video-title">{video_title}</h4>
         <p class="video-meta">
@@ -591,10 +590,9 @@ def generate_html_newsletter(article_with_embeds: str, metadata: Dict) -> str:
             transform: translateY(-5px);
         }}
 
-        .video-thumbnail-link {{
-            display: block;
-            text-decoration: none;
+        .video-container {{
             position: relative;
+            cursor: pointer;
         }}
 
         .video-thumbnail {{
@@ -607,8 +605,16 @@ def generate_html_newsletter(article_with_embeds: str, metadata: Dict) -> str:
             transition: all 0.3s ease;
         }}
 
-        .video-thumbnail-link:hover .video-thumbnail {{
+        .video-container:hover .video-thumbnail {{
             transform: scale(1.02);
+        }}
+
+        .video-container iframe {{
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
         }}
 
         .play-button {{
@@ -618,9 +624,11 @@ def generate_html_newsletter(article_with_embeds: str, metadata: Dict) -> str:
             transform: translate(-50%, -50%);
             transition: all 0.3s ease;
             filter: drop-shadow(0 4px 10px rgba(0,0,0,0.3));
+            cursor: pointer;
+            z-index: 10;
         }}
 
-        .video-thumbnail-link:hover .play-button {{
+        .video-container:hover .play-button {{
             transform: translate(-50%, -50%) scale(1.1);
         }}
 
@@ -773,6 +781,36 @@ def generate_html_newsletter(article_with_embeds: str, metadata: Dict) -> str:
             </p>
         </div>
     </div>
+
+    <script>
+        function loadVideo(playButton) {{
+            // Get the video clip container
+            const videoClip = playButton.closest('.video-clip');
+            const videoContainer = videoClip.querySelector('.video-container');
+            const videoId = videoClip.getAttribute('data-video-id');
+            const startTime = videoClip.getAttribute('data-start-time');
+
+            // Create iframe element
+            const iframe = document.createElement('iframe');
+            iframe.setAttribute('width', '100%');
+            iframe.setAttribute('height', '100%');
+            iframe.setAttribute('src', `https://www.youtube.com/embed/${{videoId}}?start=${{startTime}}&autoplay=1`);
+            iframe.setAttribute('title', 'YouTube video player');
+            iframe.setAttribute('frameborder', '0');
+            iframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share');
+            iframe.setAttribute('allowfullscreen', '');
+            iframe.style.position = 'absolute';
+            iframe.style.top = '0';
+            iframe.style.left = '0';
+
+            // Replace thumbnail with iframe
+            videoContainer.innerHTML = '';
+            videoContainer.style.position = 'relative';
+            videoContainer.style.paddingBottom = '56.25%';
+            videoContainer.style.height = '0';
+            videoContainer.appendChild(iframe);
+        }}
+    </script>
 </body>
 </html>"""
 
