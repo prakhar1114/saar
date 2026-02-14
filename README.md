@@ -1,59 +1,103 @@
-# YouTube Video Transcript Fetcher
+# AI-Powered YouTube Newsletter Generator
 
-This tool fetches videos published **yesterday** from a list of YouTube channels and downloads their transcripts (including timestamps).
+This tool automates the process of tracking YouTube channels, processing their content, and generating high-quality AI newsletters. It fetches video transcripts, indexes them using semantic search (ChromaDB), and uses Google Gemini to write comprehensive digests with embedded video clips.
 
-## Setup
+## 🚀 Features
 
-1.  **Install Dependencies:**
+- **Automated Monitoring**: Scans specified YouTube channels for videos published yesterday.
+- **Smart Retrieval**: Fetches transcripts (manual or auto-generated) and chunks them for granular search.
+- **Semantic Search**: Uses **ChromaDB** and **Google Vertex AI** embeddings to find relevant video clips based on your keywords.
+- **AI Writing**: Uses **Google Gemini** to synthesize information from multiple videos into a cohesive news article.
+- **Rich Output**:
+  - **HTML Newsletter**: Beautifully styled with **embedded video clips** that start exactly at the right timestamp.
+  - **WhatsApp**: Formatted messages with timestamped links, ready to send via Twilio.
+
+## 🛠️ Prerequisites
+
+- **Python 3.8+**
+- **Google Cloud Platform Project** with Vertex AI API enabled.
+- **API Keys**:
+  - YouTube Data API v3
+  - Google Gemini API
+  - Twilio (optional, for WhatsApp)
+
+## 📦 Installation
+
+1.  **Clone the repository:**
+    ```bash
+    git clone <your-repo-url>
+    cd saar
+    ```
+
+2.  **Install dependencies:**
     ```bash
     pip install -r requirements.txt
     ```
 
-2.  **API Key:**
-    Ensure you have a `.env` file in this directory with your YouTube Data API key:
+3.  **Configure Environment Variables:**
+    Create a `.env` file in the root directory with the following keys:
+
+    ```ini
+    # Google / YouTube
+    YOUTUBE_API_KEY=your_youtube_api_key
+    GEMINI_API_KEY=your_gemini_api_key
+    GCP_PROJECT_ID=your_google_cloud_project_id
+
+    # Twilio (Optional - for WhatsApp)
+    TWILIO_ACCOUNT_SID=your_twilio_sid
+    TWILIO_AUTH_TOKEN=your_twilio_auth_token
+    TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
+    SENDER_NUMBER=+1234567890  # Default recipient number
     ```
-    YOUTUBE_API_KEY=your_api_key_here
-    ```
 
-## Usage
+## 🏃‍♂️ Usage Workflow
 
-1.  **Open `fetch_youtube_data.py`** and edit the `channels_to_scan` list with the channel names you want to track.
+### Step 1: Fetch Video Data
+Scans your configured channels for videos published yesterday and saves their transcripts.
 
+1.  Open `fetch_youtube_data.py` and update the `channels_to_scan` list:
     ```python
     channels_to_scan = [
         "Marques Brownlee",
-        "Veritasium",
-        # Add your channels here
+        "@Veritasium",
+        "CNBC Television"
     ]
     ```
-
-2.  **Run the script:**
+2.  Run the script:
     ```bash
-    python3 fetch_youtube_data.py
+    python fetch_youtube_data.py
     ```
+    *Output: `video_transcripts.json` and `video_chunked_transcripts.jsonl`*
 
-## Output
+### Step 2: Build/Update Vector Database
+Ingests the chunked transcripts into ChromaDB for semantic search.
 
-The script saves the data to `video_transcripts.json` in the following format:
+```bash
+python chromadb_setup.py
+```
+*Output: Creates/Updates `./chroma_db` directory.*
 
-```json
-[
-    {
-        "channel": "Channel Name",
-        "video_title": "Video Title",
-        "video_url": "https://www.youtube.com/watch?v=...",
-        "published_at": "2023-10-27T10:00:00Z",
-        "transcript": [
-             {"text": "Hello world", "start": 0.0, "duration": 1.5},
-             ...
-        ]
-    }
-]
+### Step 3: Generate Newsletter
+Searches the database for your keywords and generates the newsletter.
+
+```bash
+python generate_newsletter.py
 ```
 
-## Functions
+**Interactive Prompts:**
+1.  **Keywords**: Enter topics to search for (e.g., "AI, Stock Market, Apple").
+2.  **Language**: Target language for the article (e.g., "English", "Hindi").
+3.  **Output Format**: HTML, WhatsApp, or Both.
 
-If you want to use the logic in your own scripts, you can import the functions:
+**Outputs:**
+- `newsletter.html`: Open in your browser to view the interactive article.
+- `newsletter_whatsapp.txt`: Formatted text block for WhatsApp.
+- *(Optional)* Sends WhatsApp message directly if Twilio is configured.
 
-*   `get_channel_videos_yesterday(channel_name)`: Returns a list of video objects.
-*   `get_video_transcript(video_id)`: Returns the transcript for a video.
+## 📂 Project Structure
+
+- `fetch_youtube_data.py`: Fetches videos & transcripts.
+- `chromadb_setup.py`: Indexes data into Vector DB.
+- `generate_newsletter.py`: Main AI generation logic.
+- `chromadb_search.py`: Helper tool to test search queries manually.
+- `requirements.txt`: Python dependencies.
