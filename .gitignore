@@ -27,3 +27,6 @@ chroma_db/
 .idea/
 *.swp
 *.swo
+
+*.html
+

@@ -14,3 +14,6 @@ google-cloud-aiplatform
 # Optional: For GCP Vertex Search (if needed later)
 google-cloud-storage
 google-cloud-discoveryengine
+
+# Gemini AI for Newsletter Generation
+google-generativeai>=0.3.0
