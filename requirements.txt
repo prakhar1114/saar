@@ -17,3 +17,6 @@ google-cloud-discoveryengine
 
 # Gemini AI for Newsletter Generation
 google-generativeai>=0.3.0
+
+# Twilio for WhatsApp Integration
+twilio>=8.0.0

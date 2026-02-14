@@ -13,6 +13,7 @@ from vertexai.language_models import TextEmbeddingModel
 import vertexai
 from dotenv import load_dotenv
 from google import genai
+from twilio.rest import Client
 
 load_dotenv()
 
@@ -817,6 +818,213 @@ def generate_html_newsletter(article_with_embeds: str, metadata: Dict) -> str:
     return html
 
 
+def format_article_for_whatsapp(article: str, chunks: List[Dict], keywords: List[str]) -> str:
+    """
+    Format article for WhatsApp with proper formatting and video links.
+
+    Args:
+        article: Article text with [1], [2], [3] citations
+        chunks: List of transcript chunks
+        keywords: Search keywords
+
+    Returns:
+        WhatsApp-formatted text with clickable video links
+    """
+    # Track which citations have been replaced
+    replaced_citations = set()
+
+    def replace_citation_with_link(match):
+        citation_num = int(match.group(1))
+
+        # Check if valid citation number
+        if citation_num < 1 or citation_num > len(chunks):
+            return match.group(0)
+
+        chunk = chunks[citation_num - 1]
+        metadata = chunk['metadata']
+
+        video_id = metadata.get('video_id', '')
+        video_url = metadata.get('video_url', '')
+        video_title = metadata.get('video_title', 'Video')
+        channel = metadata.get('channel', 'Unknown')
+        start_time = metadata.get('chunk_start_time', 0)
+        end_time = metadata.get('chunk_end_time', 0)
+
+        # Create timestamped YouTube URL
+        if video_url and '?' in video_url:
+            timestamp_url = f"{video_url}&t={int(start_time)}s"
+        else:
+            timestamp_url = f"https://www.youtube.com/watch?v={video_id}&t={int(start_time)}s"
+
+        # Only create detailed link for first occurrence
+        if citation_num not in replaced_citations:
+            replaced_citations.add(citation_num)
+            # Clean video embed with title and link
+            return f"\n\n🎬 *{video_title}*\n_{channel}_ • {int(start_time)}s-{int(end_time)}s\n{timestamp_url}\n"
+        else:
+            # Subsequent occurrences - just the citation number
+            return f" [{citation_num}]"
+
+    # Replace citations with video links
+    formatted_text = re.sub(r'\[(\d+)\]', replace_citation_with_link, article)
+
+    # Convert markdown headers to WhatsApp formatting
+    # # Header -> *HEADER* (bold)
+    formatted_text = re.sub(r'^# (.+)$', lambda m: f"\n*{m.group(1)}*\n{'━'*30}\n", formatted_text, flags=re.MULTILINE)
+
+    # ## Header -> *Header* (bold with spacing)
+    formatted_text = re.sub(r'^## (.+)$', lambda m: f"\n\n*{m.group(1)}*\n", formatted_text, flags=re.MULTILINE)
+
+    # Clean up excessive newlines
+    formatted_text = re.sub(r'\n{4,}', '\n\n\n', formatted_text)
+
+    # Remove leading/trailing whitespace
+    formatted_text = formatted_text.strip()
+
+    return formatted_text
+
+
+def split_message_intelligently(message: str, max_length: int = 1500) -> List[str]:
+    """
+    Split message into chunks intelligently by sections.
+
+    Args:
+        message: The full message text
+        max_length: Maximum characters per chunk (default 1500 to leave room for headers)
+
+    Returns:
+        List of message chunks
+    """
+    # Split by major sections (lines with ===)
+    sections = []
+    current_section = []
+
+    for line in message.split('\n'):
+        if '===' in line or '━━━' in line:
+            # This is a section divider
+            if current_section:
+                sections.append('\n'.join(current_section))
+                current_section = []
+            current_section.append(line)
+        else:
+            current_section.append(line)
+
+    # Add last section
+    if current_section:
+        sections.append('\n'.join(current_section))
+
+    # Now group sections into chunks
+    chunks = []
+    current_chunk = ""
+
+    for section in sections:
+        # If adding this section exceeds limit, start new chunk
+        if current_chunk and len(current_chunk) + len(section) + 2 > max_length:
+            chunks.append(current_chunk.strip())
+            current_chunk = section + "\n\n"
+        else:
+            current_chunk += section + "\n\n"
+
+    # Add final chunk
+    if current_chunk.strip():
+        chunks.append(current_chunk.strip())
+
+    # If any chunk is still too long, split by paragraphs
+    final_chunks = []
+    for chunk in chunks:
+        if len(chunk) <= max_length:
+            final_chunks.append(chunk)
+        else:
+            # Split by paragraphs
+            paragraphs = chunk.split('\n\n')
+            temp_chunk = ""
+
+            for para in paragraphs:
+                if len(temp_chunk) + len(para) + 2 <= max_length:
+                    temp_chunk += para + "\n\n"
+                else:
+                    if temp_chunk.strip():
+                        final_chunks.append(temp_chunk.strip())
+                    temp_chunk = para + "\n\n"
+
+            if temp_chunk.strip():
+                final_chunks.append(temp_chunk.strip())
+
+    return final_chunks
+
+
+def send_whatsapp_message(message: str, to_number: str, media_urls: List[str] = None) -> bool:
+    """
+    Send WhatsApp message using Twilio API with intelligent splitting.
+
+    Args:
+        message: The formatted message text
+        to_number: Recipient's WhatsApp number (format: whatsapp:+1234567890)
+        media_urls: Optional list of media URLs to send
+
+    Returns:
+        True if sent successfully, False otherwise
+    """
+    # Get Twilio credentials from environment
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+    from_number = os.getenv("TWILIO_WHATSAPP_NUMBER")  # Format: whatsapp:+14155238886
+
+    if not all([account_sid, auth_token, from_number]):
+        raise ValueError(
+            "Missing Twilio credentials. Please add to .env file:\n"
+            "TWILIO_ACCOUNT_SID=your_account_sid\n"
+            "TWILIO_AUTH_TOKEN=your_auth_token\n"
+            "TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886"
+        )
+
+    # Ensure to_number has whatsapp: prefix
+    if not to_number.startswith('whatsapp:'):
+        to_number = f'whatsapp:{to_number}'
+
+    try:
+        client = Client(account_sid, auth_token)
+
+        # Split message intelligently
+        max_length = 1500  # Leave room for part headers
+        chunks = split_message_intelligently(message, max_length)
+
+        total_parts = len(chunks)
+        print(f"\n📊 Message will be split into {total_parts} part(s)")
+
+        messages_sent = 0
+
+        for i, chunk in enumerate(chunks, 1):
+            # Add part header if multiple parts
+            if total_parts > 1:
+                part_header = f"📬 *Part {i}/{total_parts}*\n{'='*25}\n\n"
+                message_body = part_header + chunk
+            else:
+                message_body = chunk
+
+            # Send message
+            msg = client.messages.create(
+                body=message_body,
+                from_=from_number,
+                to=to_number,
+                media_url=media_urls if (media_urls and i == 1) else None  # Only send media with first part
+            )
+
+            print(f"✓ Part {i}/{total_parts} sent: {msg.sid} ({len(message_body)} chars)")
+            messages_sent += 1
+
+            # Small delay between messages to avoid rate limiting
+            if i < total_parts:
+                time.sleep(1)
+
+        print(f"\n✅ Successfully sent {messages_sent} WhatsApp message(s)")
+        return True
+
+    except Exception as e:
+        print(f"\n❌ Error sending WhatsApp message: {str(e)}")
+        return False
+
+
 def main():
     """Main orchestration function."""
     print("="*80)
@@ -836,11 +1044,40 @@ def main():
     if not language:
         language = "English"
 
-    output_file = input("Enter output filename (default: newsletter.html): ").strip()
-    if not output_file:
-        output_file = "newsletter.html"
-    elif not output_file.endswith('.html'):
-        output_file += '.html'
+    # Ask for output format
+    print("\nOutput format:")
+    print("  1. HTML newsletter (for web/email)")
+    print("  2. WhatsApp message (via Twilio)")
+    print("  3. Both (HTML + WhatsApp)")
+    output_choice = input("Choose output format (1/2/3, default: 1): ").strip()
+
+    if output_choice not in ['1', '2', '3', '']:
+        output_choice = '1'
+
+    html_output = output_choice in ['1', '3', '']
+    whatsapp_output = output_choice in ['2', '3']
+
+    # Get output filename if HTML is selected
+    output_file = None
+    if html_output:
+        output_file = input("Enter HTML output filename (default: newsletter.html): ").strip()
+        if not output_file:
+            output_file = "newsletter.html"
+        elif not output_file.endswith('.html'):
+            output_file += '.html'
+
+    # Get WhatsApp details if selected
+    whatsapp_number = None
+    if whatsapp_output:
+
+        load_dotenv()
+        default_whatsapp_number = os.getenv("SENDER_NUMBER", "").strip()
+        whatsapp_number = input(f"Enter recipient WhatsApp number (e.g., +1234567890) [default: {default_whatsapp_number}]: ").strip()
+        if not whatsapp_number:
+            whatsapp_number = default_whatsapp_number
+        if not whatsapp_number:
+            print("Error: WhatsApp number is required")
+            return
 
     print("\n" + "="*80)
 
@@ -861,34 +1098,67 @@ def main():
         prompt = build_article_prompt(chunks, language, keywords)
         article = generate_article_with_gemini(gemini_model, prompt)
 
-        # 4. Replace citations with video embeds
-        print("\n🎬 Embedding video clips...")
-        article_with_videos = replace_citations_with_video_clips(article, chunks)
+        # 4. Generate outputs based on user selection
+        if html_output:
+            print("\n🎬 Embedding video clips for HTML...")
+            article_with_videos = replace_citations_with_video_clips(article, chunks)
 
-        # 5. Generate HTML
-        print("\n📄 Creating HTML newsletter...")
-        html = generate_html_newsletter(
-            article_with_videos,
-            metadata={
-                'title': f"AI News Digest: {', '.join(keywords)}",
-                'date': datetime.now().strftime('%Y-%m-%d'),
-                'keywords': keywords,
-                'total_videos': len(set(c['metadata']['video_id'] for c in chunks)),
-                'total_chunks': len(chunks)
-            }
-        )
+            print("\n📄 Creating HTML newsletter...")
+            html = generate_html_newsletter(
+                article_with_videos,
+                metadata={
+                    'title': f"AI News Digest: {', '.join(keywords)}",
+                    'date': datetime.now().strftime('%Y-%m-%d'),
+                    'keywords': keywords,
+                    'total_videos': len(set(c['metadata']['video_id'] for c in chunks)),
+                    'total_chunks': len(chunks)
+                }
+            )
 
-        # 6. Save to file
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(html)
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(html)
+
+            print(f"✓ HTML newsletter saved to: {output_file}")
+
+        if whatsapp_output:
+            print("\n📱 Formatting for WhatsApp...")
+            whatsapp_message = format_article_for_whatsapp(article, chunks, keywords)
+
+            # Save WhatsApp version to file for preview
+            whatsapp_file = "newsletter_whatsapp.txt"
+            with open(whatsapp_file, 'w', encoding='utf-8') as f:
+                f.write(whatsapp_message)
+            print(f"✓ WhatsApp message saved to: {whatsapp_file}")
+
+            # Ask for confirmation before sending
+            print(f"\n📊 Message stats:")
+            print(f"   - Length: {len(whatsapp_message)} characters")
+            print(f"   - Estimated messages: {(len(whatsapp_message) // 1600) + 1}")
+            print(f"   - Recipient: {whatsapp_number}")
+
+            # confirm = input("\nSend WhatsApp message now? (y/n): ").strip().lower()
+            confirm = 'y'
+
+            if confirm == 'y':
+                print("\n📤 Sending WhatsApp message...")
+                success = send_whatsapp_message(whatsapp_message, whatsapp_number)
+
+                if not success:
+                    print("\n⚠️  WhatsApp message not sent. Check your Twilio credentials in .env file.")
+            else:
+                print("\n⏸️  WhatsApp message not sent (user cancelled)")
 
         print("\n" + "="*80)
         print("✅ SUCCESS!")
         print("="*80)
-        print(f"✓ Newsletter saved to: {output_file}")
         print(f"✓ Total sources: {len(chunks)} clips from {len(set(c['metadata']['video_id'] for c in chunks))} videos")
         print(f"✓ Language: {language}")
-        print("\nOpen the file in your browser to view the newsletter!")
+
+        if html_output:
+            print(f"\n🌐 HTML: Open {output_file} in your browser")
+        if whatsapp_output:
+            print(f"📱 WhatsApp: Preview message in newsletter_whatsapp.txt")
+
         print("="*80)
 
     except Exception as e:
